@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My First Year · A4 photo template</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #edf0eb; color: #243129; font: 16px system-ui, sans-serif; }
+  main { max-width: 1180px; margin: auto; padding: 24px; }
+  h1 { margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+  button { cursor: pointer; font: inherit; }
+  .toolbar button { background: #315140; color: white; border: 0; border-radius: 6px; padding: 8px 15px; }
+  .preview { overflow: auto; }
+  .sheet { position: relative; width: 297mm; height: 210mm; background: white; }
+  .frame { position: absolute; left: 28.5mm; top: 17.5mm; width: 240mm; height: 175mm; outline: 1px dashed #a3aba3; pointer-events: none; }
+  .slot { position: absolute; width: 34mm; height: 26mm; border: 0; padding: 0; background: #e2ebe3; color: #243129; }
+  .slot.portrait { width: 64mm; height: 64mm; }
+  .slot { overflow: hidden; }
+  .slot img { display: block; position: absolute; pointer-events: none; }
+  .slot.filled { cursor: grab; touch-action: none; user-select: none; }
+  .slot.dragging { cursor: grabbing; }
+  @media screen { .slot.selected { outline: 2px solid #315140; outline-offset: -2px; } }
+  .slot img[hidden] { display: none; }
+  .slot::after { content: ''; position: absolute; inset: 2mm; border: 1px dashed white; border-radius: 3mm; pointer-events: none; }
+  .slot.portrait::after { border-radius: 50%; }
+  @page { size: A4 landscape; margin: 0; }
+  @media print {
+    html, body, main, .preview { margin: 0; padding: 0; max-width: none; overflow: visible; background: white; }
+    .controls, .frame, .slot span, .slot::after { display: none; }
+    .slot, .slot.portrait { background: none; }
+    .sheet { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="controls">
+    <h1>My First Year photo template</h1>
+    <p>Click an empty tile to add a photo. Drag a filled photo to reposition it. Select a photo to zoom, reset the crop or replace it. The dashed guides show the areas visible through the frame.</p>
+    <p>Print on A4 landscape at 100% or Actual size. Turn off headers, footers and borderless enlargement.</p>
+    <div class="toolbar">
+      <button id="print" type="button">Print A4</button>
+      <label>Zoom <input id="zoom" type="range" min="1" max="4" step="0.01" value="1" disabled></label>
+      <button id="reset" type="button" disabled>Reset crop</button>
+      <button id="replace" type="button" disabled>Replace photo</button>
+      <span id="status" role="status">0 of 13 photos added</span>
+    </div>
+    <input id="picker" type="file" accept="image/*" hidden>
+  </section>
+  <div class="preview">
+    <div class="sheet" id="sheet"><div class="frame"></div></div>
+  </div>
+</main>
+<script>
+  const sheet = document.querySelector('#sheet');
+  const picker = document.querySelector('#picker');
+  const status = document.querySelector('#status');
+  const zoom = document.querySelector('#zoom');
+  const reset = document.querySelector('#reset');
+  const replace = document.querySelector('#replace');
+  let selected, pending;
+
+  function select(slot) {
+    selected?.button.classList.remove('selected');
+    selected = slot;
+    slot.button.classList.add('selected');
+    zoom.value = slot.scale;
+    zoom.disabled = reset.disabled = replace.disabled = slot.photo.hidden;
+  }
+
+  function openPicker(slot) {
+    pending = slot;
+    picker.value = '';
+    picker.click();
+  }
+
+  function render(slot) {
+    const { photo, width, height, ratio, scale } = slot;
+    const coverWidth = Math.max(1, ratio * height / width) * scale;
+    const coverHeight = Math.max(1, width / (ratio * height)) * scale;
+    slot.extraX = coverWidth - 1;
+    slot.extraY = coverHeight - 1;
+    slot.x = Math.min(0, Math.max(-slot.extraX, slot.x));
+    slot.y = Math.min(0, Math.max(-slot.extraY, slot.y));
+    photo.style.width = coverWidth * 100 + '%';
+    photo.style.height = coverHeight * 100 + '%';
+    photo.style.left = slot.x * 100 + '%';
+    photo.style.top = slot.y * 100 + '%';
+  }
+
+  function resetCrop(slot) {
+    slot.scale = 1;
+    slot.x = slot.y = -Infinity;
+    render(slot);
+    slot.x = -slot.extraX / 2;
+    slot.y = -slot.extraY / 2;
+    render(slot);
+  }
+
+  zoom.addEventListener('input', () => {
+    const next = Number(zoom.value);
+    const multiplier = next / selected.scale;
+    selected.x = 0.5 + (selected.x - 0.5) * multiplier;
+    selected.y = 0.5 + (selected.y - 0.5) * multiplier;
+    selected.scale = next;
+    render(selected);
+  });
+  reset.addEventListener('click', () => {
+    resetCrop(selected);
+    zoom.value = selected.scale;
+  });
+  replace.addEventListener('click', () => openPicker(selected));
+
+  function tile(label, centreX, centreY, width, height, portrait = false) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = portrait ? 'slot portrait' : 'slot';
+    button.setAttribute('aria-label', label + ' photo');
+    button.style.left = (centreX - width / 2) + 'mm';
+    button.style.top = (centreY - height / 2) + 'mm';
+
+    const title = document.createElement('span');
+    title.textContent = label;
+    const photo = document.createElement('img');
+    photo.alt = '';
+    photo.hidden = true;
+    button.append(title, photo);
+    const slot = { button, photo, width, height, scale: 1 };
+    let drag;
+    button.addEventListener('click', () => {
+      select(slot);
+      if (photo.hidden) openPicker(slot);
+    });
+    button.addEventListener('pointerdown', event => {
+      if (photo.hidden || event.button !== 0 || drag) return;
+      select(slot);
+      const bounds = button.getBoundingClientRect();
+      drag = { id: event.pointerId, x: event.clientX, y: event.clientY,
+        left: slot.x, top: slot.y, width: bounds.width, height: bounds.height };
+      button.setPointerCapture(event.pointerId);
+      button.classList.add('dragging');
+    });
+    button.addEventListener('pointermove', event => {
+      if (drag?.id !== event.pointerId) return;
+      slot.x = drag.left + (event.clientX - drag.x) / drag.width;
+      slot.y = drag.top + (event.clientY - drag.y) / drag.height;
+      render(slot);
+    });
+    button.addEventListener('lostpointercapture', () => {
+      drag = undefined;
+      button.classList.remove('dragging');
+    });
+    sheet.append(button);
+  }
+
+  for (let row = 0; row < 6; row++) {
+    const y = 40 + 26 * row;
+    tile('Month ' + (row + 1), 54.5, y, 34, 26);
+    tile('Month ' + (row + 7), 242.5, y, 34, 26);
+  }
+  tile('Birthday portrait', 112.5, 94, 64, 64, true);
+
+  picker.addEventListener('change', () => {
+    const file = picker.files[0];
+    if (!file || !pending) return;
+    const slot = pending;
+    const { photo, button } = slot;
+    const url = URL.createObjectURL(file);
+    const testImage = new Image();
+    testImage.onload = () => {
+      if (photo.src) URL.revokeObjectURL(photo.src);
+      photo.src = url;
+      photo.hidden = false;
+      slot.ratio = testImage.naturalWidth / testImage.naturalHeight;
+      button.classList.add('filled');
+      resetCrop(slot);
+      if (selected === slot) select(slot);
+      photo.previousElementSibling.hidden = true;
+      status.textContent = sheet.querySelectorAll('img:not([hidden])').length + ' of 13 photos added';
+    };
+    testImage.onerror = () => {
+      URL.revokeObjectURL(url);
+      status.textContent = 'Could not open that image. Try a JPEG or PNG.';
+    };
+    testImage.src = url;
+  });
+  document.querySelector('#print').addEventListener('click', () => window.print());
+</script>
+</body>
+</html>
